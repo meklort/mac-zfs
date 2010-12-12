@@ -67,7 +67,7 @@ const dmu_object_type_info_t dmu_ot[DMU_OT_NUMTYPES] = {
 	{	zap_byteswap,		TRUE,	"DSL props"		},
 	{	byteswap_uint64_array,	TRUE,	"DSL dataset"		},
 	{	zfs_znode_byteswap,	TRUE,	"ZFS znode"		},
-	{	zfs_acl_byteswap,	TRUE,	"ZFS ACL"		},
+	{	zfs_oldacl_byteswap,	TRUE,	"ZFS V0 ACL"		},
 	{	byteswap_uint8_array,	FALSE,	"ZFS plain file"	},
 	{	zap_byteswap,		TRUE,	"ZFS directory"		},
 	{	zap_byteswap,		TRUE,	"ZFS master node"	},
@@ -81,7 +81,11 @@ const dmu_object_type_info_t dmu_ot[DMU_OT_NUMTYPES] = {
 	{	byteswap_uint8_array,	TRUE,	"SPA history"		},
 	{	byteswap_uint64_array,	TRUE,	"SPA history offsets"	},
 	{	zap_byteswap,		TRUE,	"Pool properties"	},
-	{	zap_byteswap,		TRUE,	"DSL permissions"	}
+	{	zap_byteswap,		TRUE,	"DSL permissions"	},
+	{	zfs_acl_byteswap,	TRUE,	"ZFS ACL"		},
+	{	byteswap_uint8_array,	TRUE,	"ZFS SYSACL"		},
+	{	byteswap_uint8_array,	TRUE,	"FUID table"		},
+	{	byteswap_uint64_array,	TRUE,	"FUID table size"	},
 };
 
 int

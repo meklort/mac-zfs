@@ -40,6 +40,7 @@
 #include <stdlib.h>
 #include <strings.h>
 #include <unistd.h>
+#include <stddef.h>
 #ifndef	__APPLE__
 #include <zone.h>
 #endif /*!__APPLE__*/
@@ -60,8 +61,8 @@
 #include <stddef.h>
 #include <sys/ucred.h>
 #include <sys/spa.h>
-#include <sys/zio.h>
 #include <sys/zap.h>
+#include <sys/zfs_i18n.h>
 #include <libzfs.h>
 
 #include "zfs_namecheck.h"
@@ -146,7 +147,8 @@ path_to_str(const char *path, int types)
  * 'buf' detailing exactly why the name was not valid.
  */
 static int
-zfs_validate_name(libzfs_handle_t *hdl, const char *path, int type)
+zfs_validate_name(libzfs_handle_t *hdl, const char *path, int type,
+    boolean_t modifying)
 {
 	namecheck_err_t why;
 	char what;
@@ -219,13 +221,20 @@ zfs_validate_name(libzfs_handle_t *hdl, const char *path, int type)
 		return (0);
 	}
 
+	if (modifying && strchr(path, '%') != NULL) {
+		if (hdl != NULL)
+			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+			    "invalid character %c in name"), '%');
+		return (0);
+	}
+
 	return (-1);
 }
 
 int
 zfs_name_valid(const char *name, zfs_type_t type)
 {
-	return (zfs_validate_name(NULL, name, type));
+	return (zfs_validate_name(NULL, name, type, B_FALSE));
 }
 
 /*
@@ -380,11 +389,8 @@ top:
 			zc.zc_objset_type = DMU_OST_ZFS;
 		}
 
-		/* If we can successfully roll it back, reget the stats */
-		if (ioctl(hdl->libzfs_fd, ZFS_IOC_ROLLBACK, &zc) == 0)
-			goto top;
 		/*
-		 * If we can sucessfully destroy it, pretend that it
+		 * If we can successfully destroy it, pretend that it
 		 * never existed.
 		 */
 		if (ioctl(hdl->libzfs_fd, ZFS_IOC_DESTROY, &zc) == 0) {
@@ -393,6 +399,9 @@ top:
 			errno = ENOENT;
 			return (NULL);
 		}
+		/* If we can successfully roll it back, reget the stats */
+		if (ioctl(hdl->libzfs_fd, ZFS_IOC_ROLLBACK, &zc) == 0)
+			goto top;
 	}
 
 	/*
@@ -436,7 +445,7 @@ zfs_open(libzfs_handle_t *hdl, const char *path, int types)
 	/*
 	 * Validate the name before we even try to open it.
 	 */
-	if (!zfs_validate_name(hdl, path, ZFS_TYPE_DATASET)) {
+	if (!zfs_validate_name(hdl, path, ZFS_TYPE_DATASET, B_FALSE)) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "invalid dataset name"));
 		(void) zfs_error(hdl, EZFS_INVALIDNAME, errbuf);
@@ -474,7 +483,6 @@ zfs_close(zfs_handle_t *zhp)
 	free(zhp);
 }
 
-
 /*
  * Given an nvlist of properties to set, validates that they are correct, and
  * parses any numeric properties (index, boolean, etc) if they are specified as
@@ -489,7 +497,10 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 	char *strval = NULL;
 	zfs_prop_t prop;
 	nvlist_t *ret;
-	
+	int chosen_sense = -1;
+	int chosen_normal = -1;
+	int chosen_utf = -1;
+
 	if (type == ZFS_TYPE_SNAPSHOT) {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "snapshot properties cannot be modified"));
@@ -553,7 +564,7 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 		}
 
 		if (zfs_prop_readonly(prop) &&
-		    (prop != ZFS_PROP_VOLBLOCKSIZE || zhp != NULL)) {
+		    (!zfs_prop_setonce(prop) || zhp != NULL)) {
 			zfs_error_aux(hdl,
 			    dgettext(TEXT_DOMAIN, "'%s' is readonly"),
 			    propname);
@@ -657,6 +668,7 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 		}
 
 
+		case ZFS_PROP_SHARESMB:
 		case ZFS_PROP_SHARENFS:
 #ifdef __APPLE__
 // Issue 25
@@ -666,17 +678,20 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 			goto error;
 #else
 			/*
-			 * For the mountpoint and sharenfs properties, check if
-			 * it can be set in a global/non-global zone based on
+			 * For the mountpoint and sharenfs or sharesmb
+			 * properties, check if it can be set in a
+			 * global/non-global zone based on
 			 * the zoned property value:
 			 *
 			 *		global zone	    non-global zone
 			 * --------------------------------------------------
 			 * zoned=on	mountpoint (no)	    mountpoint (yes)
 			 *		sharenfs (no)	    sharenfs (no)
+			 *		sharesmb (no)	    sharesmb (no)
 			 *
 			 * zoned=off	mountpoint (yes)	N/A
 			 *		sharenfs (yes)
+			 *		sharesmb (yes)
 			 */
 #ifndef __APPLE__
 				if (zoned) {
@@ -688,7 +703,8 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 					(void) zfs_error(hdl, EZFS_ZONED,
 					    errbuf);
 					goto error;
-				} else if (prop == ZFS_PROP_SHARENFS) {
+				} else if (prop == ZFS_PROP_SHARENFS ||
+				    prop == ZFS_PROP_SHARESMB) {
 					zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 					    "'%s' cannot be set in "
 					    "a non-global zone"), propname);
@@ -713,17 +729,24 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 			 * property. Now we want to make sure that the
 			 * property value is valid if it is sharenfs.
 			 */
-			if (prop == ZFS_PROP_SHARENFS &&
+			if ((prop == ZFS_PROP_SHARENFS ||
+			    prop == ZFS_PROP_SHARESMB) &&
 			    strcmp(strval, "on") != 0 &&
 			    strcmp(strval, "off") != 0) {
+				zfs_share_proto_t proto;
+
+				if (prop == ZFS_PROP_SHARESMB)
+					proto = PROTO_SMB;
+				else
+					proto = PROTO_NFS;
 
 				/*
-				 * Must be an NFS option string so
-				 * init the libshare in order to
-				 * enable the parser and then parse
-				 * the options. We use the control API
-				 * since we don't care about the
-				 * current configuration and don't
+				 * Must be an valid sharing protocol
+				 * option string so init the libshare
+				 * in order to enable the parser and
+				 * then parse the options. We use the
+				 * control API since we don't care about
+				 * the current configuration and don't
 				 * want the overhead of loading it
 				 * until we actually do something.
 				 */
@@ -743,7 +766,7 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 					goto error;
 				}
 
-				if (zfs_parse_options(strval, "nfs") != SA_OK) {
+				if (zfs_parse_options(strval, proto) != SA_OK) {
 					/*
 					 * There was an error in parsing so
 					 * deal with it by issuing an error
@@ -764,6 +787,15 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 
 			break;
 #endif /* __APPLE__ */
+		case ZFS_PROP_CASE:
+			chosen_sense = (int)intval;
+			break;
+		case ZFS_PROP_UTF8ONLY:
+			chosen_utf = (int)intval;
+			break;
+		case ZFS_PROP_NORMALIZE:
+			chosen_normal = (int)intval;
+			break;
 		}
 
 		/*
@@ -779,6 +811,7 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 
 			switch (prop) {
 			case ZFS_PROP_RESERVATION:
+			case ZFS_PROP_REFRESERVATION:
 				if (intval > volsize) {
 					zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 					    "'%s' is greater than current "
@@ -813,6 +846,40 @@ zfs_validate_properties(libzfs_handle_t *hdl, zfs_type_t type, nvlist_t *nvl,
 				break;
 			}
 		}
+	}
+
+	/*
+	 * Temporarily disallow any non-default settings for
+	 * casesensitivity, normalization, and/or utf8only.
+	 */
+	if (chosen_sense > ZFS_CASE_SENSITIVE || chosen_utf > 0 ||
+	    chosen_normal > ZFS_NORMALIZE_NONE) {
+		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+		    "Non-default values for casesensitivity, utf8only, and "
+		    "normalization are (temporarily) disabled"));
+		(void) zfs_error(hdl, EZFS_BADPROP, errbuf);
+		goto error;
+	}
+
+	/*
+	 * If normalization was chosen, but no UTF8 choice was made,
+	 * enforce rejection of non-UTF8 names.
+	 *
+	 * If normalization was chosen, but rejecting non-UTF8 names
+	 * was explicitly not chosen, it is an error.
+	 */
+	if (chosen_normal > ZFS_NORMALIZE_NONE && chosen_utf < 0) {
+		if (nvlist_add_uint64(ret,
+		    zfs_prop_to_name(ZFS_PROP_UTF8ONLY), 1) != 0) {
+			(void) no_memory(hdl);
+			goto error;
+		}
+	} else if (chosen_normal > ZFS_NORMALIZE_NONE && chosen_utf == 0) {
+		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+		    "'%s' must be set 'on' if normalization chosen"),
+		    zfs_prop_to_name(ZFS_PROP_UTF8ONLY));
+		(void) zfs_error(hdl, EZFS_BADPROP, errbuf);
+		goto error;
 	}
 
 	/*
@@ -971,7 +1038,7 @@ zfs_perms_add_who_nvlist(nvlist_t *who_nvp, uint64_t whoid, void *whostr,
  *           whostr may be null for everyone or create perms.
  * who_type: is the type of entry in whostr.  Typically this will be
  *           ZFS_DELEG_WHO_UNKNOWN.
- * perms:    comman separated list of permissions.  May be null if user
+ * perms:    common separated list of permissions.  May be null if user
  *           is requested to remove permissions by who.
  * inherit:  Specifies the inheritance of the permissions.  Will be either
  *           ZFS_DELEG_PERM_LOCAL and/or  ZFS_DELEG_PERM_DESCENDENT.
@@ -1169,29 +1236,26 @@ static void
 zfs_destroy_perm_tree(avl_tree_t *tree)
 {
 	zfs_perm_node_t *permnode;
-	void *cookie;
+	void *cookie = NULL;
 
-	cookie = NULL;
-	while ((permnode = avl_destroy_nodes(tree,  &cookie)) != NULL) {
-		avl_remove(tree, permnode);
+	while ((permnode = avl_destroy_nodes(tree,  &cookie)) != NULL)
 		free(permnode);
-	}
+	avl_destroy(tree);
 }
 
 static void
 zfs_destroy_tree(avl_tree_t *tree)
 {
 	zfs_allow_node_t *allownode;
-	void *cookie;
+	void *cookie = NULL;
 
-	cookie = NULL;
 	while ((allownode = avl_destroy_nodes(tree, &cookie)) != NULL) {
 		zfs_destroy_perm_tree(&allownode->z_localdescend);
 		zfs_destroy_perm_tree(&allownode->z_local);
 		zfs_destroy_perm_tree(&allownode->z_descend);
-		avl_remove(tree, allownode);
 		free(allownode);
 	}
+	avl_destroy(tree);
 }
 
 void
@@ -1603,6 +1667,7 @@ zfs_prop_set(zfs_handle_t *zhp, const char *propname, const char *propval)
 			 */
 			switch (prop) {
 			case ZFS_PROP_QUOTA:
+			case ZFS_PROP_REFQUOTA:
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "size is less than current used or "
 				    "reserved space"));
@@ -1610,6 +1675,7 @@ zfs_prop_set(zfs_handle_t *zhp, const char *propname, const char *propval)
 				break;
 
 			case ZFS_PROP_RESERVATION:
+			case ZFS_PROP_REFRESERVATION:
 				zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 				    "size is greater than available space"));
 				(void) zfs_error(hdl, EZFS_PROPSPACE, errbuf);
@@ -1865,6 +1931,11 @@ get_numeric_property(zfs_handle_t *zhp, zfs_prop_t prop, zprop_source_t *src,
 		mntopt_on = MNTOPT_XATTR;
 		mntopt_off = MNTOPT_NOXATTR;
 		break;
+
+	case ZFS_PROP_NBMAND:
+		mntopt_on = MNTOPT_NBMAND;
+		mntopt_off = MNTOPT_NONBMAND;
+		break;
 	}
 
 	/*
@@ -1905,6 +1976,7 @@ get_numeric_property(zfs_handle_t *zhp, zfs_prop_t prop, zprop_source_t *src,
 	case ZFS_PROP_READONLY:
 	case ZFS_PROP_SETUID:
 	case ZFS_PROP_XATTR:
+	case ZFS_PROP_NBMAND:
 		*val = getprop_uint64(zhp, prop, source);
 
 		if (hasmntopt(&mnt, mntopt_on) && !*val) {
@@ -1927,7 +1999,9 @@ get_numeric_property(zfs_handle_t *zhp, zfs_prop_t prop, zprop_source_t *src,
 		break;
 
 	case ZFS_PROP_QUOTA:
+	case ZFS_PROP_REFQUOTA:
 	case ZFS_PROP_RESERVATION:
+	case ZFS_PROP_REFRESERVATION:
 		*val = getprop_uint64(zhp, prop, source);
 		if (*val == 0)
 			*source = "";	/* default */
@@ -2100,7 +2174,10 @@ zfs_prop_get(zfs_handle_t *zhp, zfs_prop_t prop, char *propbuf, size_t proplen,
 		break;
 
 	case ZFS_PROP_QUOTA:
+	case ZFS_PROP_REFQUOTA:
 	case ZFS_PROP_RESERVATION:
+	case ZFS_PROP_REFRESERVATION:
+
 		if (get_numeric_property(zhp, prop, src, &source, &val) != 0)
 			return (-1);
 
@@ -2219,10 +2296,9 @@ uint64_t
 zfs_prop_get_int(zfs_handle_t *zhp, zfs_prop_t prop)
 {
 	char *source;
-	zprop_source_t sourcetype = ZPROP_SRC_NONE;
 	uint64_t val;
 
-	(void) get_numeric_property(zhp, prop, &sourcetype, &source, &val);
+	(void) get_numeric_property(zhp, prop, NULL, &source, &val);
 
 	return (val);
 }
@@ -2284,6 +2360,9 @@ zfs_iter_filesystems(zfs_handle_t *zhp, zfs_iter_f func, void *data)
 	zfs_handle_t *nzhp;
 	int ret;
 
+	if (zhp->zfs_type != ZFS_TYPE_FILESYSTEM)
+		return (0);
+
 	for ((void) strlcpy(zc.zc_name, zhp->zfs_name, sizeof (zc.zc_name));
 	    ioctl(zhp->zfs_hdl->libzfs_fd, ZFS_IOC_DATASET_LIST_NEXT, &zc) == 0;
 	    (void) strlcpy(zc.zc_name, zhp->zfs_name, sizeof (zc.zc_name))) {
@@ -2326,6 +2405,9 @@ zfs_iter_snapshots(zfs_handle_t *zhp, zfs_iter_f func, void *data)
 	zfs_cmd_t zc = { 0 };
 	zfs_handle_t *nzhp;
 	int ret;
+
+	if (zhp->zfs_type == ZFS_TYPE_SNAPSHOT)
+		return (0);
 
 	for ((void) strlcpy(zc.zc_name, zhp->zfs_name, sizeof (zc.zc_name));
 	    ioctl(zhp->zfs_hdl->libzfs_fd, ZFS_IOC_SNAPSHOT_LIST_NEXT,
@@ -2476,7 +2558,7 @@ zfs_dataset_exists(libzfs_handle_t *hdl, const char *path, zfs_type_t types)
 {
 	zfs_handle_t *zhp;
 
-	if (!zfs_validate_name(hdl, path, types))
+	if (!zfs_validate_name(hdl, path, types, B_FALSE))
 		return (B_FALSE);
 
 	/*
@@ -2490,6 +2572,86 @@ zfs_dataset_exists(libzfs_handle_t *hdl, const char *path, zfs_type_t types)
 			return (B_TRUE);
 	}
 	return (B_FALSE);
+}
+
+/*
+ * Given a path to 'target', create all the ancestors between
+ * the prefixlen portion of the path, and the target itself.
+ * Fail if the initial prefixlen-ancestor does not already exist.
+ */
+int
+create_parents(libzfs_handle_t *hdl, char *target, int prefixlen)
+{
+	zfs_handle_t *h;
+	char *cp;
+	const char *opname;
+
+	/* make sure prefix exists */
+	cp = target + prefixlen;
+	if (*cp != '/') {
+		assert(strchr(cp, '/') == NULL);
+		h = zfs_open(hdl, target, ZFS_TYPE_FILESYSTEM);
+	} else {
+		*cp = '\0';
+		h = zfs_open(hdl, target, ZFS_TYPE_FILESYSTEM);
+		*cp = '/';
+	}
+	if (h == NULL)
+		return (-1);
+	zfs_close(h);
+
+	/*
+	 * Attempt to create, mount, and share any ancestor filesystems,
+	 * up to the prefixlen-long one.
+	 */
+	for (cp = target + prefixlen + 1;
+	    cp = strchr(cp, '/'); *cp = '/', cp++) {
+		char *logstr;
+
+		*cp = '\0';
+
+		h = make_dataset_handle(hdl, target);
+		if (h) {
+			/* it already exists, nothing to do here */
+			zfs_close(h);
+			continue;
+		}
+
+		logstr = hdl->libzfs_log_str;
+		hdl->libzfs_log_str = NULL;
+		if (zfs_create(hdl, target, ZFS_TYPE_FILESYSTEM,
+		    NULL) != 0) {
+			hdl->libzfs_log_str = logstr;
+			opname = dgettext(TEXT_DOMAIN, "create");
+			goto ancestorerr;
+		}
+
+		hdl->libzfs_log_str = logstr;
+		h = zfs_open(hdl, target, ZFS_TYPE_FILESYSTEM);
+		if (h == NULL) {
+			opname = dgettext(TEXT_DOMAIN, "open");
+			goto ancestorerr;
+		}
+
+		if (zfs_mount(h, NULL, 0) != 0) {
+			opname = dgettext(TEXT_DOMAIN, "mount");
+			goto ancestorerr;
+		}
+
+		if (zfs_share(h) != 0) {
+			opname = dgettext(TEXT_DOMAIN, "share");
+			goto ancestorerr;
+		}
+
+		zfs_close(h);
+	}
+
+	return (0);
+
+ancestorerr:
+	zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
+	    "failed to %s ancestor '%s'"), opname, target);
+	return (-1);
 }
 
 /*
@@ -2534,7 +2696,7 @@ zfs_create(libzfs_handle_t *hdl, const char *path, zfs_type_t type,
 	    "cannot create '%s'"), path);
 
 	/* validate the path, taking care to note the extended error message */
-	if (!zfs_validate_name(hdl, path, type))
+	if (!zfs_validate_name(hdl, path, type, B_TRUE))
 		return (zfs_error(hdl, EZFS_INVALIDNAME, errbuf));
 
 	/* validate parents exist */
@@ -2825,7 +2987,7 @@ zfs_clone(zfs_handle_t *zhp, const char *target, nvlist_t *props)
 	    "cannot create '%s'"), target);
 
 	/* validate the target name */
-	if (!zfs_validate_name(hdl, target, ZFS_TYPE_FILESYSTEM))
+	if (!zfs_validate_name(hdl, target, ZFS_TYPE_FILESYSTEM, B_TRUE))
 		return (zfs_error(hdl, EZFS_INVALIDNAME, errbuf));
 
 	/* validate parents exist */
@@ -2977,7 +3139,7 @@ zfs_promote(zfs_handle_t *zhp)
 		return (zfs_error(hdl, EZFS_BADTYPE, errbuf));
 	}
 
-	(void) strlcpy(parent, zhp->zfs_dmustats.dds_clone_of, sizeof (parent));
+	(void) strlcpy(parent, zhp->zfs_dmustats.dds_origin, sizeof (parent));
 	if (parent[0] == '\0') {
 		zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
 		    "not a cloned filesystem"));
@@ -2987,7 +3149,7 @@ zfs_promote(zfs_handle_t *zhp)
 	*cp = '\0';
 
 	/* Walk the snapshots we will be moving */
-	pzhp = zfs_open(hdl, zhp->zfs_dmustats.dds_clone_of, ZFS_TYPE_SNAPSHOT);
+	pzhp = zfs_open(hdl, zhp->zfs_dmustats.dds_origin, ZFS_TYPE_SNAPSHOT);
 	if (pzhp == NULL)
 		return (-1);
 	pd.cb_pivot_txg = zfs_prop_get_int(pzhp, ZFS_PROP_CREATETXG);
@@ -3006,7 +3168,7 @@ zfs_promote(zfs_handle_t *zhp)
 	}
 
 	/* issue the ioctl */
-	(void) strlcpy(zc.zc_value, zhp->zfs_dmustats.dds_clone_of,
+	(void) strlcpy(zc.zc_value, zhp->zfs_dmustats.dds_origin,
 	    sizeof (zc.zc_value));
 	(void) strlcpy(zc.zc_name, zhp->zfs_name, sizeof (zc.zc_name));
 	ret = zfs_ioctl(hdl, ZFS_IOC_PROMOTE, &zc);
@@ -3090,7 +3252,7 @@ zfs_snapshot(libzfs_handle_t *hdl, const char *path, boolean_t recursive)
 	    "cannot snapshot '%s'"), path);
 
 	/* validate the target name */
-	if (!zfs_validate_name(hdl, path, ZFS_TYPE_SNAPSHOT))
+	if (!zfs_validate_name(hdl, path, ZFS_TYPE_SNAPSHOT, B_TRUE))
 		return (zfs_error(hdl, EZFS_INVALIDNAME, errbuf));
 
 	/* make sure the parent exists and is of the appropriate type */
@@ -3605,14 +3767,14 @@ rollback_destroy(zfs_handle_t *zhp, void *data)
 			if (zfs_destroy(zhp) != 0)
 				cbp->cb_error = 1;
 			else
-				changelist_remove(zhp, cbp->cb_clp);
+				changelist_remove(cbp->cb_clp, zhp->zfs_name);
 			zhp->zfs_hdl->libzfs_log_str = logstr;
 		}
 	} else {
 		if (zfs_destroy(zhp) != 0)
 			cbp->cb_error = 1;
 		else
-			changelist_remove(zhp, cbp->cb_clp);
+			changelist_remove(cbp->cb_clp, zhp->zfs_name);
 	}
 
 	zfs_close(zhp);
@@ -3812,7 +3974,7 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive)
 				    errbuf));
 			}
 		}
-		if (!zfs_validate_name(hdl, target, zhp->zfs_type))
+		if (!zfs_validate_name(hdl, target, zhp->zfs_type, B_TRUE))
 			return (zfs_error(hdl, EZFS_INVALIDNAME, errbuf));
 	} else {
 		if (recursive) {
@@ -3821,7 +3983,7 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive)
 			return (zfs_error(hdl, EZFS_BADTYPE, errbuf));
 		}
 
-		if (!zfs_validate_name(hdl, target, zhp->zfs_type))
+		if (!zfs_validate_name(hdl, target, zhp->zfs_type, B_TRUE))
 			return (zfs_error(hdl, EZFS_INVALIDNAME, errbuf));
 		uint64_t unused;
 
@@ -3919,7 +4081,7 @@ zfs_rename(zfs_handle_t *zhp, const char *target, boolean_t recursive)
 		 * be in zc.zc_name
 		 */
 		(void) snprintf(errbuf, sizeof (errbuf), dgettext(TEXT_DOMAIN,
-		    "cannot rename to '%s'"), zc.zc_name);
+		    "cannot rename '%s'"), zc.zc_name);
 
 		if (recursive && errno == EEXIST) {
 			zfs_error_aux(hdl, dgettext(TEXT_DOMAIN,
@@ -4264,7 +4426,7 @@ zfs_iscsi_perm_check(libzfs_handle_t *hdl, char *dataset, struct ucred *cred)
 
 int
 zfs_deleg_share_nfs(libzfs_handle_t *hdl, char *dataset, char *path,
-    void *export, void *sharetab, int sharemax, boolean_t share_on)
+    void *export, void *sharetab, int sharemax, zfs_share_op_t operation)
 {
 	zfs_cmd_t zc = { 0 };
 	int error;
@@ -4273,7 +4435,7 @@ zfs_deleg_share_nfs(libzfs_handle_t *hdl, char *dataset, char *path,
 	(void) strlcpy(zc.zc_value, path, sizeof (zc.zc_value));
 	zc.zc_share.z_sharedata = (uint64_t)(uintptr_t)sharetab;
 	zc.zc_share.z_exportdata = (uint64_t)(uintptr_t)export;
-	zc.zc_share.z_sharetype = share_on;
+	zc.zc_share.z_sharetype = operation;
 	zc.zc_share.z_sharemax = sharemax;
 
 	error = ioctl(hdl->libzfs_fd, ZFS_IOC_SHARE, &zc);

@@ -31,6 +31,7 @@
 
 #pragma ident	"%Z%%M%	%I%	%E% SMI"
 
+#include <sys/pathname.h>
 #include <sys/dmu.h>
 #include <sys/zfs_znode.h>
 
@@ -44,6 +45,8 @@ extern "C" {
 #define	ZSHARED		0x0004		/* shared access (zfs_dirlook()) */
 #define	ZXATTR		0x0008		/* we want the xattr dir */
 #define	ZRENAMING	0x0010		/* znode is being renamed */
+#define	ZCILOOK		0x0020		/* case-insensitive lookup requested */
+#define	ZCIEXACT	0x0040		/* c-i requires c-s match (rename) */
 
 /* mknode flags */
 #define	IS_ROOT_NODE	0x01		/* create a root node */
@@ -55,7 +58,7 @@ extern int zfs_dirent_lock(zfs_dirlock_t **, znode_t *, struct componentname *,
                            znode_t **, int);
 #else
 extern int zfs_dirent_lock(zfs_dirlock_t **, znode_t *, char *, znode_t **,
-    int);
+    int, int *, pathname_t *);
 #endif
 extern void zfs_dirent_unlock(zfs_dirlock_t *);
 extern int zfs_link_create(zfs_dirlock_t *, znode_t *, dmu_tx_t *, int);
@@ -65,11 +68,14 @@ extern int zfs_link_destroy(zfs_dirlock_t *, znode_t *, dmu_tx_t *, int,
 #ifdef __APPLE__
 extern int zfs_dirlook(znode_t *, struct componentname *, vnode_t **);
 #else
-extern int zfs_dirlook(znode_t *, char *, vnode_t **);
+extern int zfs_dirlook(znode_t *, char *, vnode_t **, int, int *,
+    pathname_t *);
 #endif
 extern void zfs_mknode(znode_t *, vattr_t *, uint64_t *,
-    dmu_tx_t *, cred_t *, uint_t, znode_t **, int);
+    dmu_tx_t *, cred_t *, uint_t, znode_t **, int,
+    zfs_acl_t *, zfs_fuid_info_t **);
 extern void zfs_rmnode(znode_t *);
+extern void zfs_dl_name_switch(zfs_dirlock_t *dl, char *new, char **old);
 extern boolean_t zfs_dirempty(znode_t *);
 extern void zfs_unlinked_add(znode_t *, dmu_tx_t *);
 extern void zfs_unlinked_drain(zfsvfs_t *zfsvfs);
