@@ -36,6 +36,7 @@
 		26B7E4A90B0A84B600C0C00F /* zpool.8 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 269334CA0AD1C3FC000CDAB9 /* zpool.8 */; };
 		26E59EC70B87AAE600CFC573 /* zoink.c in Sources */ = {isa = PBXBuildFile; fileRef = 26E59EC60B87AAE600CFC573 /* zoink.c */; };
 		26E8B80C0B7243590006CCAF /* VolumeIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 26E8B80B0B7243590006CCAF /* VolumeIcon.icns */; };
+		270B2F8615E329A800638C93 /* opensolaris_sunddi.c in Sources */ = {isa = PBXBuildFile; fileRef = 270B2F8515E329A800638C93 /* opensolaris_sunddi.c */; };
 		FA0D29FF10A39F8000C63936 /* avl.c in Sources */ = {isa = PBXBuildFile; fileRef = FA93765A10A38E6300754C9E /* avl.c */; };
 		FA0D2A0F10A39F8000C63936 /* deviceid.c in Sources */ = {isa = PBXBuildFile; fileRef = FA93757B10A38E6300754C9E /* deviceid.c */; };
 		FA0D2A1010A39F8000C63936 /* devid.c in Sources */ = {isa = PBXBuildFile; fileRef = FA93765C10A38E6300754C9E /* devid.c */; };
@@ -374,6 +375,7 @@
 		26E59EC60B87AAE600CFC573 /* zoink.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = zoink.c; sourceTree = "<group>"; };
 		26E8B80B0B7243590006CCAF /* VolumeIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = VolumeIcon.icns; sourceTree = "<group>"; };
 		26F63DB20AABD480000C5196 /* zfs */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = zfs; sourceTree = BUILT_PRODUCTS_DIR; };
+		270B2F8515E329A800638C93 /* opensolaris_sunddi.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = opensolaris_sunddi.c; sourceTree = "<group>"; };
 		32A4FEC30562C75700D090E7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = zfs_kext/Info.plist; sourceTree = "<group>"; };
 		32A4FEC40562C75800D090E7 /* zfs.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = zfs.kext; sourceTree = BUILT_PRODUCTS_DIR; };
 		DAD6B41710940DCF008A0395 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = /System/Library/Frameworks/Foundation.framework; sourceTree = "<absolute>"; };
@@ -1339,6 +1341,7 @@
 		FA9656AA11F1BFA3001E7C56 /* kernel */ = {
 			isa = PBXGroup;
 			children = (
+				270B2F8515E329A800638C93 /* opensolaris_sunddi.c */,
 				FA9656AB11F1BFA3001E7C56 /* maczfs_kernel.c */,
 				FA9656AC11F1BFA3001E7C56 /* maczfs_kernel.h */,
 				FA9656AD11F1BFA3001E7C56 /* zfs_context.c */,
@@ -1807,6 +1810,7 @@
 				FA9656AF11F1BFA3001E7C56 /* maczfs_kernel.c in Sources */,
 				FA9656B011F1BFA3001E7C56 /* zfs_context.c in Sources */,
 				FA965A1611F366D2001E7C56 /* zmod.c in Sources */,
+				270B2F8615E329A800638C93 /* opensolaris_sunddi.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

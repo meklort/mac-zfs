@@ -26,10 +26,6 @@
 
 #pragma ident	"%Z%%M%	%I%	%E% SMI"
 
-#ifndef __APPLE__
-#include <sys/salib.h>
-#endif /*!__APPLE__*/
-#include <sys/time.h>
 #include <sys/nvpair.h>
 #include <stdlib.h>
 
