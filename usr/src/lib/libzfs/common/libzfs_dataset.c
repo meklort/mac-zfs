@@ -4700,9 +4700,10 @@ zfs_iscsi_perm_check(libzfs_handle_t *hdl, char *dataset, struct ucred *cred)
 	gid = ucred_getegid(cred);
 	group_cnt = ucred_getgroups(cred, &groups);
 #else
-	uid = cred->cr_uid;
-	gid = cred->cr_gid;
-	group_cnt = cred->cr_ngroups;
+// TODO: check for correct mac os x version here...
+	uid = cred->cr_posix.cr_uid;
+	gid = cred->cr_posix.cr_gid;
+	group_cnt = cred->cr_posix.cr_ngroups;
 #endif
 
 	if (uid == (uid_t)-1 || gid == (uid_t)-1 || group_cnt == (uid_t)-1)

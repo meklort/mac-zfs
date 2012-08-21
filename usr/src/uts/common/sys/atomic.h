@@ -35,7 +35,8 @@
 
 
 #ifndef __i386__
-
+#if 0
+// FIXME: Error while compiling if building on 10.7
 extern Boolean OSCompareAndSwap64(UInt64 oldValue, UInt64 newValue, volatile UInt64 *address);
 
 extern SInt64 OSAddAtomic64(SInt64 theAmount, volatile SInt64 *address);
@@ -43,7 +44,7 @@ extern SInt64 OSAddAtomic64(SInt64 theAmount, volatile SInt64 *address);
 extern SInt64 OSIncrementAtomic64(volatile SInt64 *address);
 
 extern SInt64 OSDecrementAtomic64(volatile SInt64 *address);
-
+#endif
 #endif  /* !__i386__ */
 
 /*
